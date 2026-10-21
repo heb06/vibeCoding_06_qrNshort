@@ -14,13 +14,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    if (pending) return;
+
     let original;
     try {
       original = new URL(longUrl.value.trim());
     } catch {
-      message.textContent = '올바른 URL을 입력해 주세요.';
+      message.textContent = 'https://를 포함한 올바른 URL을 입력해 주세요.';
       return;
     }
+
     if (!['http:', 'https:'].includes(original.protocol)) {
       message.textContent = 'http:// 또는 https:// 주소를 입력해 주세요.';
       return;
@@ -34,42 +37,42 @@ document.addEventListener('DOMContentLoaded', () => {
     copyButton.disabled = true;
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
+
     try {
-      // Shrtr API: JSON POST, browser CORS supported; does not require an API key.
-      const response = await fetch('https://shrtr.top/api/v1/shorten', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: original.href }),
+      // 수업 예제 저장소와 동일한 clck.ru API 패턴을 사용합니다.
+      const endpoint = `https://clck.ru/--?url=${encodeURIComponent(original.href)}`;
+      const response = await fetch(endpoint, {
+        method: 'GET',
+        mode: 'cors',
+        cache: 'no-store',
         signal: controller.signal
       });
 
-      let data = {};
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error('단축 서비스에서 올바른 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.');
-      }
-
       if (!response.ok) {
-        if (response.status === 429) {
-          throw new Error('단축 요청이 많아 잠시 제한되었습니다. 잠시 기다린 뒤 다시 시도해 주세요.');
-        }
-        throw new Error(data.detail || data.title || data.error || `단축 요청 실패 (${response.status})`);
+        throw new Error(`단축 서비스에서 오류 응답을 받았습니다 (${response.status}).`);
       }
 
-      if (!data.short_url) {
-        throw new Error('응답에 단축 URL이 없습니다. 잠시 후 다시 시도해 주세요.');
+      const result = (await response.text()).trim();
+      let parsed;
+      try {
+        parsed = new URL(result);
+      } catch {
+        throw new Error('단축 서비스가 올바른 URL을 반환하지 않았습니다. 다른 주소로 다시 시도해 주세요.');
       }
 
-      shortUrl.value = data.short_url;
+      if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+        throw new Error('단축 서비스가 올바른 URL을 반환하지 않았습니다.');
+      }
+
+      shortUrl.value = parsed.href;
       copyButton.disabled = false;
       message.textContent = '단축 URL 생성이 완료되었습니다.';
     } catch (error) {
       if (error.name === 'AbortError') {
-        message.textContent = '응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.';
+        message.textContent = '단축 서비스 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.';
       } else if (error instanceof TypeError) {
-        message.textContent = '단축 서비스에 연결하지 못했습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.';
+        message.textContent = '단축 서비스 연결 또는 브라우저 보안(CORS) 문제입니다. 잠시 후 다시 시도해 주세요.';
       } else {
         message.textContent = error.message || 'URL 단축 중 오류가 발생했습니다.';
       }
@@ -83,17 +86,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   copyButton.addEventListener('click', async () => {
     if (!shortUrl.value) return;
+
     try {
       await navigator.clipboard.writeText(shortUrl.value);
+      message.textContent = '복사하였습니다.';
     } catch {
       shortUrl.focus();
       shortUrl.select();
       const copied = document.execCommand('copy');
-      if (!copied) {
-        message.textContent = '복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.';
-        return;
-      }
+      message.textContent = copied
+        ? '복사하였습니다.'
+        : '복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.';
     }
-    message.textContent = '단축 URL을 복사했습니다.';
   });
 });
