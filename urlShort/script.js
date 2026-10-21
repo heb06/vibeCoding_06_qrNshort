@@ -1,3 +1,8 @@
+/* QRnShort URL Shortener
+ * Matches the current urlShort/index.html element IDs.
+ * Uses is.gd JSONP (officially supports callback= for cross-domain use),
+ * then tries v.gd if the first host fails.
+ */
 document.addEventListener('DOMContentLoaded', () => {
   const form = document.getElementById('short-form');
   const longUrl = document.getElementById('long-url');
@@ -5,103 +10,146 @@ document.addEventListener('DOMContentLoaded', () => {
   const shortenButton = document.getElementById('shorten-btn');
   const copyButton = document.getElementById('copy-btn');
   const message = document.getElementById('message');
+
+  if (!form || !longUrl || !shortUrl || !shortenButton || !copyButton || !message) {
+    console.error('QRnShort: 필요한 HTML 요소를 찾을 수 없습니다.');
+    return;
+  }
+
   let pending = false;
+  const CACHE_KEY = 'qrnshort-url-cache-v1';
 
-  longUrl.addEventListener('input', () => {
-    shortenButton.disabled = !longUrl.value.trim() || pending;
-    message.textContent = '';
-  });
+  function readCache(originalUrl) {
+    try {
+      const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+      return typeof cache[originalUrl] === 'string' ? cache[originalUrl] : '';
+    } catch {
+      return '';
+    }
+  }
 
-  // JSONP 요청이 시간 초과되거나 네트워크에서 실패하면 retryable 오류로 처리합니다.
-  function requestShortener(domain, url) {
+  function writeCache(originalUrl, tinyUrl) {
+    try {
+      const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
+      cache[originalUrl] = tinyUrl;
+      localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+    } catch {
+      // URL shortening still works when browser storage is unavailable.
+    }
+  }
+
+  function callJsonp(host, originalUrl, timeoutMs = 10000) {
     return new Promise((resolve, reject) => {
-      const callbackName = `shortenerCallback_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+      const callbackName = `qrnShortCallback_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const script = document.createElement('script');
-      let finished = false;
+      let settled = false;
+      let timerId;
 
       const cleanup = () => {
-        if (finished) return;
-        finished = true;
-        window.clearTimeout(timer);
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timerId);
+        script.onerror = null;
         script.remove();
-        delete window[callbackName];
+        try { delete window[callbackName]; } catch { window[callbackName] = undefined; }
       };
 
-      const timer = window.setTimeout(() => {
+      timerId = window.setTimeout(() => {
         cleanup();
-        const error = new Error(`${domain} 응답 시간 초과`);
-        error.retryable = true;
-        reject(error);
-      }, 12000);
+        reject(new Error(`${host} 응답 시간 초과`));
+      }, timeoutMs);
 
       window[callbackName] = (data) => {
+        if (settled) return;
         cleanup();
-        if (data && data.shorturl) {
-          resolve(data.shorturl);
-          return;
+        if (data && typeof data.shorturl === 'string') {
+          let returned;
+          try { returned = new URL(data.shorturl); } catch {
+            reject(new Error(`${host}가 올바른 단축 URL을 반환하지 않았습니다.`));
+            return;
+          }
+          if (returned.protocol === 'https:' || returned.protocol === 'http:') {
+            resolve(returned.href);
+            return;
+          }
         }
-        const error = new Error(data?.errormessage || `${domain}에서 URL 단축에 실패했습니다.`);
-        // API가 명시적으로 오류를 반환한 경우에는 재요청을 반복하지 않습니다.
-        error.retryable = false;
-        reject(error);
+        const apiMessage = data && typeof data.errormessage === 'string'
+          ? data.errormessage
+          : '단축 서비스에서 오류 응답을 반환했습니다.';
+        reject(new Error(`${host}: ${apiMessage}`));
       };
 
+      script.async = true;
       script.onerror = () => {
         cleanup();
-        const error = new Error(`${domain} 연결 오류`);
-        error.retryable = true;
-        reject(error);
+        reject(new Error(`${host} 연결 실패`));
       };
 
-      const query = new URLSearchParams({
+      const params = new URLSearchParams({
         format: 'json',
         callback: callbackName,
-        url
+        url: originalUrl
       });
-      script.src = `https://${domain}/create.php?${query.toString()}`;
-      document.body.appendChild(script);
+      script.src = `https://${host}/create.php?${params.toString()}`;
+      document.head.appendChild(script);
     });
   }
 
+  async function shorten(originalUrl) {
+    try {
+      return await callJsonp('is.gd', originalUrl);
+    } catch (firstError) {
+      message.textContent = `is.gd 요청 실패 (${firstError.message}). 다른 주소로 재시도합니다...`;
+      return await callJsonp('v.gd', originalUrl);
+    }
+  }
+
+  longUrl.addEventListener('input', () => {
+    shortenButton.disabled = !longUrl.value.trim() || pending;
+    if (!pending) message.textContent = '';
+  });
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    let original;
+    if (pending) return;
+
+    let parsed;
     try {
-      original = new URL(longUrl.value.trim());
+      parsed = new URL(longUrl.value.trim());
     } catch {
-      message.textContent = '올바른 URL을 입력해 주세요.';
+      message.textContent = 'https://를 포함한 올바른 URL을 입력해 주세요.';
       return;
     }
-    if (!['http:', 'https:'].includes(original.protocol)) {
-      message.textContent = 'http:// 또는 https:// 주소를 입력해 주세요.';
+    if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+      message.textContent = 'http:// 또는 https://로 시작하는 주소를 입력해 주세요.';
+      return;
+    }
+
+    const originalUrl = parsed.href;
+    const cached = readCache(originalUrl);
+    if (cached) {
+      shortUrl.value = cached;
+      copyButton.disabled = false;
+      message.textContent = '이전에 생성한 단축 URL을 불러왔습니다.';
       return;
     }
 
     pending = true;
     shortenButton.disabled = true;
     shortenButton.textContent = '단축 중...';
-    message.textContent = 'URL 단축 서비스에 연결하고 있습니다.';
     shortUrl.value = '';
     copyButton.disabled = true;
+    message.textContent = 'URL 단축 서비스를 요청하고 있습니다...';
 
     try {
-      let result;
-      try {
-        result = await requestShortener('is.gd', original.href);
-      } catch (firstError) {
-        if (!firstError.retryable) throw firstError;
-        message.textContent = '첫 번째 서비스 응답이 없어 다른 서비스로 다시 시도하고 있습니다.';
-        result = await requestShortener('v.gd', original.href);
-      }
+      const result = await shorten(originalUrl);
       shortUrl.value = result;
       copyButton.disabled = false;
+      writeCache(originalUrl, result);
       message.textContent = '단축 URL 생성이 완료되었습니다.';
     } catch (error) {
-      if (error.retryable) {
-        message.textContent = 'URL 단축 서비스가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.';
-      } else {
-        message.textContent = error.message || 'URL 단축 중 오류가 발생했습니다.';
-      }
+      console.error('QRnShort URL shortening failed:', error);
+      message.textContent = `단축 실패: ${error.message}. 잠시 후 다시 시도해 주세요.`;
     } finally {
       pending = false;
       shortenButton.textContent = '단축하기';
@@ -113,15 +161,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!shortUrl.value) return;
     try {
       await navigator.clipboard.writeText(shortUrl.value);
+      message.textContent = '단축 URL을 복사했습니다.';
     } catch {
       shortUrl.focus();
       shortUrl.select();
       const copied = document.execCommand('copy');
-      if (!copied) {
-        message.textContent = '복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.';
-        return;
-      }
+      message.textContent = copied
+        ? '단축 URL을 복사했습니다.'
+        : '복사가 되지 않았습니다. 결과 주소를 직접 선택해 복사해 주세요.';
     }
-    alert('복사하였습니다');
   });
 });
