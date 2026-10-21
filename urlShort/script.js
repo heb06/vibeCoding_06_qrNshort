@@ -12,18 +12,66 @@ document.addEventListener('DOMContentLoaded', () => {
     message.textContent = '';
   });
 
+  // JSONP 요청이 시간 초과되거나 네트워크에서 실패하면 retryable 오류로 처리합니다.
+  function requestShortener(domain, url) {
+    return new Promise((resolve, reject) => {
+      const callbackName = `shortenerCallback_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+      const script = document.createElement('script');
+      let finished = false;
+
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(timer);
+        script.remove();
+        delete window[callbackName];
+      };
+
+      const timer = window.setTimeout(() => {
+        cleanup();
+        const error = new Error(`${domain} 응답 시간 초과`);
+        error.retryable = true;
+        reject(error);
+      }, 12000);
+
+      window[callbackName] = (data) => {
+        cleanup();
+        if (data && data.shorturl) {
+          resolve(data.shorturl);
+          return;
+        }
+        const error = new Error(data?.errormessage || `${domain}에서 URL 단축에 실패했습니다.`);
+        // API가 명시적으로 오류를 반환한 경우에는 재요청을 반복하지 않습니다.
+        error.retryable = false;
+        reject(error);
+      };
+
+      script.onerror = () => {
+        cleanup();
+        const error = new Error(`${domain} 연결 오류`);
+        error.retryable = true;
+        reject(error);
+      };
+
+      const query = new URLSearchParams({
+        format: 'json',
+        callback: callbackName,
+        url
+      });
+      script.src = `https://${domain}/create.php?${query.toString()}`;
+      document.body.appendChild(script);
+    });
+  }
+
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    if (pending) return;
-
     let original;
     try {
       original = new URL(longUrl.value.trim());
     } catch {
-      message.textContent = 'https://를 포함한 올바른 URL을 입력해 주세요.';
+      message.textContent = '올바른 URL을 입력해 주세요.';
       return;
     }
-
     if (!['http:', 'https:'].includes(original.protocol)) {
       message.textContent = 'http:// 또는 https:// 주소를 입력해 주세요.';
       return;
@@ -36,48 +84,25 @@ document.addEventListener('DOMContentLoaded', () => {
     shortUrl.value = '';
     copyButton.disabled = true;
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
-
     try {
-      // 수업 예제 저장소와 동일한 clck.ru API 패턴을 사용합니다.
-      const endpoint = `https://clck.ru/--?url=${encodeURIComponent(original.href)}`;
-      const response = await fetch(endpoint, {
-        method: 'GET',
-        mode: 'cors',
-        cache: 'no-store',
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        throw new Error(`단축 서비스에서 오류 응답을 받았습니다 (${response.status}).`);
-      }
-
-      const result = (await response.text()).trim();
-      let parsed;
+      let result;
       try {
-        parsed = new URL(result);
-      } catch {
-        throw new Error('단축 서비스가 올바른 URL을 반환하지 않았습니다. 다른 주소로 다시 시도해 주세요.');
+        result = await requestShortener('is.gd', original.href);
+      } catch (firstError) {
+        if (!firstError.retryable) throw firstError;
+        message.textContent = '첫 번째 서비스 응답이 없어 다른 서비스로 다시 시도하고 있습니다.';
+        result = await requestShortener('v.gd', original.href);
       }
-
-      if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
-        throw new Error('단축 서비스가 올바른 URL을 반환하지 않았습니다.');
-      }
-
-      shortUrl.value = parsed.href;
+      shortUrl.value = result;
       copyButton.disabled = false;
       message.textContent = '단축 URL 생성이 완료되었습니다.';
     } catch (error) {
-      if (error.name === 'AbortError') {
-        message.textContent = '단축 서비스 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.';
-      } else if (error instanceof TypeError) {
-        message.textContent = '단축 서비스 연결 또는 브라우저 보안(CORS) 문제입니다. 잠시 후 다시 시도해 주세요.';
+      if (error.retryable) {
+        message.textContent = 'URL 단축 서비스가 응답하지 않습니다. 잠시 후 다시 시도해 주세요.';
       } else {
         message.textContent = error.message || 'URL 단축 중 오류가 발생했습니다.';
       }
     } finally {
-      window.clearTimeout(timeoutId);
       pending = false;
       shortenButton.textContent = '단축하기';
       shortenButton.disabled = !longUrl.value.trim();
@@ -86,17 +111,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   copyButton.addEventListener('click', async () => {
     if (!shortUrl.value) return;
-
     try {
       await navigator.clipboard.writeText(shortUrl.value);
-      message.textContent = '복사하였습니다.';
     } catch {
       shortUrl.focus();
       shortUrl.select();
       const copied = document.execCommand('copy');
-      message.textContent = copied
-        ? '복사하였습니다.'
-        : '복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.';
+      if (!copied) {
+        message.textContent = '복사에 실패했습니다. URL을 직접 선택해 복사해 주세요.';
+        return;
+      }
     }
+    alert('복사하였습니다');
   });
 });
