@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL 단축기 - QRnShort</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="page-wrap">
+    <a class="back" href="../index.html">← 뒤로가기</a>
+    <section class="short-card">
+      <p class="eyebrow">QRnShort / URL TOOL</p>
+      <h1>URL 단축기</h1>
+      <p class="subtitle">긴 URL을 짧고 간편하게 만드세요</p>
+      <form id="short-form">
+        <label for="long-url">URL 입력</label>
+        <div class="input-row">
+          <input id="long-url" type="url" placeholder="단축할 URL을 입력하세요 (https://...)" required>
+          <button id="shorten-btn" type="submit" disabled>단축하기</button>
+        </div>
+        <label for="short-url" class="result-label">단축 결과</label>
+        <div class="input-row result-row">
+          <input id="short-url" type="text" placeholder="단축된 URL이 여기에 표시됩니다." readonly>
+          <button id="copy-btn" type="button" disabled>복사</button>
+        </div>
+      </form>
+      <p id="message" class="message" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>URL2QR - URL을 QR 코드로 변환</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <header class="header"><a href="./" aria-label="URL2QR 홈페이지"><img src="img/logo.png" alt="URL2QR"></a></header>
+  <main class="page">
+    <section id="workspace" class="workspace">
+      <div id="qr-result" class="qr-result" hidden>
+        <p class="result-label">생성된 QR 코드</p>
+        <button id="download-qr" class="qr-download" type="button" title="QR 코드를 JPG 파일로 다운로드"><span id="qr-code"></span><span class="download-help">QR 코드를 누르면 JPG로 저장됩니다.</span></button>
+        <p id="result-url" class="result-url"></p>
+      </div>
+      <form id="qr-form" class="url-form">
+        <label class="sr-only" for="url-input">변환할 웹사이트 URL</label>
+        <input id="url-input" type="url" placeholder="웹사이트 URL을 입력하세요..." required>
+        <button type="submit">생성하기</button>
+      </form>
+      <p id="status-message" class="status" role="status" aria-live="polite"></p>
+    </section>
+  </main>
+  <footer>URL2QR · URL을 QR 코드로 변환</footer>
+</body>
+</html>

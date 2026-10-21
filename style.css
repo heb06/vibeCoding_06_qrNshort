@@ -1,0 +1,12 @@
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; display:grid; place-items:center; font-family:Arial,"Malgun Gothic",sans-serif; color:#f7f7ff; background:radial-gradient(ellipse at 85% 90%,#24152f 0%,#131c32 46%,#0d1425 100%); }
+.launcher-wrap { width:min(440px,calc(100% - 32px)); }
+.launcher { padding:42px 30px 34px; text-align:center; border-radius:22px; border:1px solid rgba(255,255,255,.1); background:rgba(31,43,65,.82); box-shadow:0 28px 75px rgba(0,0,0,.28); }
+.eyebrow { margin:0 0 8px; color:#8a7aff; text-transform:uppercase; font-size:11px; letter-spacing:3px; font-weight:800; }
+h1 { margin:0; font-size:31px; letter-spacing:-.8px; background:linear-gradient(90deg,#8b7bff,#e28aff); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.subtitle { margin:12px 0 30px; color:#aab5c9; font-size:14px; }
+.tool-button { display:flex; align-items:center; justify-content:center; gap:10px; width:100%; margin-top:13px; padding:16px 18px; border-radius:12px; color:#fff; font-size:15px; font-weight:800; text-decoration:none; box-shadow:0 8px 18px rgba(0,0,0,.18); transition:transform .15s ease,filter .15s ease; }
+.tool-button:hover { transform:translateY(-2px); filter:brightness(1.08); }
+.qr-button { background:linear-gradient(110deg,#655cff,#4e36d9); }
+.short-button { background:linear-gradient(110deg,#fa4298,#cf2982); }
+.tool-button span { font-size:18px; }
