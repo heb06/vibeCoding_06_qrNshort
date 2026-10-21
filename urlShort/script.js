@@ -1,181 +1,135 @@
-/* QRnShort URL Shortener - compatible with both course and project HTML IDs.
- * Supports either:
- *   (A) short-form / long-url / shorten-btn / short-url / copy-btn / message|status
- *   (B) urlInput / shortenBtn / shortUrlOutput / copyBtn / resultGroup / toast
- * Uses the is.gd JSONP API (documented callback support) and falls back to v.gd.
+/* QRnShort URL shortener — GitHub Pages / course HTML compatible.
+ * API: Shrtr POST JSON API. No API key; CORS is documented by the provider.
  */
 (function () {
-  function initQrNShort() {
-    // The project has used two versions of element IDs; support both to prevent
-    // an ID mismatch from leaving the submit button disabled and unresponsive.
+  'use strict';
+
+  function init() {
     const form = document.getElementById('short-form');
-    const urlInput = document.getElementById('long-url') || document.getElementById('urlInput');
+    const input = document.getElementById('long-url') || document.getElementById('urlInput');
     const shortenButton = document.getElementById('shorten-btn') || document.getElementById('shortenBtn');
-    const shortUrlOutput = document.getElementById('short-url') || document.getElementById('shortUrlOutput');
+    const output = document.getElementById('short-url') || document.getElementById('shortUrlOutput');
     const copyButton = document.getElementById('copy-btn') || document.getElementById('copyBtn');
+    const status = document.getElementById('message') || document.getElementById('status');
     const resultGroup = document.getElementById('resultGroup');
-    const statusElement = document.getElementById('status') || document.getElementById('message');
     const toast = document.getElementById('toast');
 
-    if (!urlInput || !shortenButton || !shortUrlOutput || !copyButton) {
-      console.error('QRnShort: URL input, shorten button, output, or copy button is missing.');
+    if (!input || !shortenButton || !output || !copyButton) {
+      console.error('QRnShort: 필요한 HTML 요소를 찾을 수 없습니다.');
+      if (status) status.textContent = '페이지 요소를 찾을 수 없습니다. HTML 파일과 script.js를 함께 확인해 주세요.';
       return;
     }
 
-    let pending = false;
+    let busy = false;
     let toastTimer = null;
 
-    function ensureStatusElement() {
-      if (statusElement) return statusElement;
-      const el = document.createElement('p');
-      el.id = 'qrnshort-status-fallback';
-      el.setAttribute('role', 'status');
-      el.setAttribute('aria-live', 'polite');
-      el.style.marginTop = '12px';
-      el.style.fontSize = '14px';
-      (shortenButton.closest('form') || shortenButton.parentElement || document.body).appendChild(el);
-      return el;
-    }
-
-    const status = ensureStatusElement();
-
     function showStatus(message, isError) {
-      status.textContent = message;
-      status.style.color = isError ? '#f09a9a' : '';
+      if (status) {
+        status.textContent = message;
+        status.style.color = isError ? '#f09a9a' : '';
+      }
       if (toast) {
         toast.textContent = message;
         toast.classList.add('show');
         window.clearTimeout(toastTimer);
-        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3000);
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3500);
       }
     }
 
-    function normalizeUrl(value) {
-      let text = String(value || '').trim();
-      if (!text) throw new Error('단축할 URL을 입력해 주세요.');
-      if (!/^https?:\/\//i.test(text)) text = 'https://' + text;
+    function normalizeUrl(raw) {
+      let value = String(raw || '').trim();
+      if (!value) throw new Error('단축할 URL을 입력해 주세요.');
+      if (!/^https?:\/\//i.test(value)) value = 'https://' + value;
       let parsed;
-      try { parsed = new URL(text); } catch (_) {
-        throw new Error('https://를 포함한 올바른 URL을 입력해 주세요.');
-      }
-      if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+      try { parsed = new URL(value); }
+      catch (_) { throw new Error('올바른 웹 주소를 입력해 주세요.'); }
+      if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || !parsed.hostname) {
         throw new Error('http:// 또는 https://로 시작하는 주소를 입력해 주세요.');
       }
       return parsed.href;
     }
 
     function updateButton() {
-      shortenButton.disabled = pending || !urlInput.value.trim();
+      shortenButton.disabled = busy || !input.value.trim();
     }
 
-    function callJsonp(host, originalUrl, timeoutMs) {
-      return new Promise((resolve, reject) => {
-        const callbackName = 'qrnShortCb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-        const script = document.createElement('script');
-        let settled = false;
-        let timer = null;
-
-        function finish(callback, value) {
-          if (settled) return;
-          settled = true;
-          if (timer !== null) window.clearTimeout(timer);
-          script.onerror = null;
-          script.remove();
-          try { delete window[callbackName]; } catch (_) { window[callbackName] = undefined; }
-          callback(value);
-        }
-
-        window[callbackName] = (data) => {
-          const shortUrl = data && (data.shorturl || data.short_url || data.shortUrl);
-          if (typeof shortUrl === 'string') {
-            try {
-              const parsed = new URL(shortUrl.trim());
-              if (['https:', 'http:'].includes(parsed.protocol) && parsed.hostname) {
-                finish(resolve, parsed.href);
-                return;
-              }
-            } catch (_) { /* report API error below */ }
-          }
-          const detail = data && (data.errormessage || data.error || data.message);
-          finish(reject, new Error(detail ? String(detail) : host + '가 단축 URL을 반환하지 않았습니다.'));
-        };
-
-        script.async = true;
-        script.onerror = () => finish(reject, new Error(host + ' 연결 실패'));
-        timer = window.setTimeout(() => finish(reject, new Error(host + ' 응답 시간 초과')), timeoutMs);
-
-        const params = new URLSearchParams({
-          format: 'json',
-          callback: callbackName,
-          url: originalUrl
-        });
-        script.src = 'https://' + host + '/create.php?' + params.toString();
-        document.head.appendChild(script);
-      });
-    }
-
-    async function requestShortUrl(originalUrl) {
-      let firstError;
-      try {
-        return await callJsonp('is.gd', originalUrl, 10000);
-      } catch (error) {
-        firstError = error;
-        showStatus('첫 번째 단축 서비스 연결 실패. 다른 서비스로 다시 시도합니다…');
-      }
-      try {
-        return await callJsonp('v.gd', originalUrl, 10000);
-      } catch (secondError) {
-        throw new Error('단축 서비스에 연결하지 못했습니다. (' + firstError.message + '; ' + secondError.message + ')');
-      }
-    }
-
-    async function handleShorten(event) {
+    async function shorten(event) {
       if (event) event.preventDefault();
-      if (pending) return;
+      if (busy) return;
 
       let originalUrl;
       try {
-        originalUrl = normalizeUrl(urlInput.value);
+        originalUrl = normalizeUrl(input.value);
       } catch (error) {
         showStatus(error.message, true);
-        urlInput.focus();
+        input.focus();
         return;
       }
 
-      pending = true;
+      busy = true;
       shortenButton.disabled = true;
-      shortenButton.textContent = '단축 중…';
-      shortUrlOutput.value = '';
+      shortenButton.textContent = '단축 중...';
+      output.value = '';
       copyButton.disabled = true;
       if (resultGroup) resultGroup.classList.remove('active');
-      showStatus('단축 URL을 요청하고 있습니다…');
+      showStatus('URL 단축 서비스에 요청 중입니다...');
 
+      const controller = new AbortController();
+      const timer = window.setTimeout(() => controller.abort(), 15000);
       try {
-        const result = await requestShortUrl(originalUrl);
-        shortUrlOutput.value = result;
+        const response = await fetch('https://shrtr.top/api/v1/shorten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: originalUrl }),
+          signal: controller.signal
+        });
+
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          if (response.status === 429) {
+            const wait = response.headers.get('Retry-After');
+            throw new Error(data.detail || ('요청 횟수 제한에 도달했습니다.' + (wait ? ' ' + wait + '초 후 다시 시도해 주세요.' : ' 잠시 후 다시 시도해 주세요.')));
+          }
+          throw new Error(data.detail || data.title || ('단축 서비스 오류 (HTTP ' + response.status + ')'));
+        }
+
+        const shortUrl = String(data.short_url || '').trim();
+        let parsedShort;
+        try { parsedShort = new URL(shortUrl); }
+        catch (_) { throw new Error('단축 서비스에서 올바른 단축 URL을 받지 못했습니다.'); }
+        if (parsedShort.protocol !== 'https:' && parsedShort.protocol !== 'http:') {
+          throw new Error('단축 서비스 응답 형식이 올바르지 않습니다.');
+        }
+
+        output.value = parsedShort.href;
         copyButton.disabled = false;
         if (resultGroup) resultGroup.classList.add('active');
         showStatus('단축 URL 생성이 완료되었습니다.');
       } catch (error) {
         console.error('QRnShort URL shortener error:', error);
-        showStatus('단축에 실패했습니다: ' + error.message, true);
+        if (error && error.name === 'AbortError') {
+          showStatus('단축 서비스 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.', true);
+        } else {
+          showStatus('단축 실패: ' + (error && error.message ? error.message : '알 수 없는 오류'), true);
+        }
       } finally {
-        pending = false;
+        window.clearTimeout(timer);
+        busy = false;
         shortenButton.textContent = '단축하기';
         updateButton();
       }
     }
 
-    async function handleCopy() {
-      const value = shortUrlOutput.value.trim();
+    async function copyResult() {
+      const value = output.value.trim();
       if (!value) return;
       try {
         await navigator.clipboard.writeText(value);
       } catch (_) {
-        shortUrlOutput.focus();
-        shortUrlOutput.select();
-        const ok = document.execCommand('copy');
-        if (!ok) {
+        output.focus();
+        output.select();
+        const copied = document.execCommand('copy');
+        if (!copied) {
           showStatus('복사에 실패했습니다. 결과 URL을 직접 선택해 복사해 주세요.', true);
           return;
         }
@@ -183,27 +137,17 @@
       showStatus('복사하였습니다!');
     }
 
-    urlInput.addEventListener('input', () => {
-      updateButton();
-      if (!pending) showStatus('');
-    });
-
-    // HTML with a form uses submit (also supports pressing Enter).
-    // The original course HTML had no form, so bind directly to its button.
-    if (form) {
-      form.addEventListener('submit', handleShorten);
-    } else {
-      shortenButton.addEventListener('click', handleShorten);
-    }
-
-    copyButton.addEventListener('click', handleCopy);
+    input.addEventListener('input', updateButton);
+    if (form) form.addEventListener('submit', shorten);
+    else shortenButton.addEventListener('click', shorten);
+    copyButton.addEventListener('click', copyResult);
     updateButton();
-    copyButton.disabled = !shortUrlOutput.value.trim();
+    copyButton.disabled = !output.value.trim();
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initQrNShort, { once: true });
+    document.addEventListener('DOMContentLoaded', init, { once: true });
   } else {
-    initQrNShort();
+    init();
   }
 })();
